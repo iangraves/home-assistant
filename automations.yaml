@@ -1,0 +1,118 @@
+- alias: SmartIR - Shared HVAC Mode Controller
+  mode: restart
+  trigger:
+    - platform: time_pattern
+      minutes: "/5"
+    - platform: state
+      entity_id:
+        - sensor.living_room_rm4_temp
+        - sensor.primary_rm4_temp
+        - sensor.nursery_rm4_temp
+
+  condition: []
+
+  action:
+    - variables:
+        now_hour: "{{ now().hour }}"
+        nursery_temp: "{{ states('sensor.nursery_rm4_temp') | float }}"
+        primary_temp: "{{ states('sensor.primary_rm4_temp') | float }}"
+        living_temp: "{{ states('sensor.living_room_rm4_temp') | float }}"
+        too_cold: "{{ states('input_number.temperature_too_cold') | float(66) }}"
+        too_hot: "{{ states('input_number.temperature_too_hot') | float(73) }}"
+        current_mode: "{{ states('input_select.hvac_mode_state') | lower }}"
+
+    - variables:
+        nursery_active: true
+        primary_active: "{{ now_hour >= 21 or now_hour < 8 }}"
+        living_active: "{{ now_hour >= 7 and now_hour < 23 }}"
+
+    - variables:
+        cool_rooms: >-
+          {{
+            [
+              'nursery' if nursery_active and nursery_temp > too_hot else '',
+              'primary' if primary_active and primary_temp > too_hot else '',
+              'living' if living_active and living_temp > too_hot else ''
+            ] | select('string') | list
+          }}
+        heat_rooms: >-
+          {{
+            [
+              'nursery' if nursery_active and nursery_temp < too_cold else '',
+              'primary' if primary_active and primary_temp < too_cold else '',
+              'living' if living_active and living_temp < too_cold else ''
+            ] | select('string') | list
+          }}
+        cool_needed: "{{ cool_rooms | length > 0 }}"
+        heat_needed: "{{ heat_rooms | length > 0 }}"
+
+    - variables:
+        max_temp: >-
+          {{ [
+            nursery_temp if 'nursery' in cool_rooms else too_cold,
+            primary_temp if 'primary' in cool_rooms else too_cold,
+            living_temp if 'living' in cool_rooms else too_cold
+          ] | max }}
+        min_temp: >-
+          {{ [
+            nursery_temp if 'nursery' in heat_rooms else too_hot,
+            primary_temp if 'primary' in heat_rooms else too_hot,
+            living_temp if 'living' in heat_rooms else too_hot
+          ] | min }}
+        fan_speed: >-
+          {% set delta = (max_temp - 70) if cool_needed else (70 - min_temp) if heat_needed else 0 %}
+          {% if delta >= 4 %}high
+          {% elif delta >= 2 %}medium
+          {% elif delta > 0 %}low
+          {% else %}low
+          {% endif %}
+        elapsed_seconds: "{{ states('sensor.hvac_mode_elapsed_seconds') | float(9999) }}"
+        min_elapsed: 900
+
+    - choose:
+        - conditions: >-
+            {{ cool_needed and current_mode != 'cool' and elapsed_seconds > min_elapsed }}
+          sequence:
+            - service: script.set_all_ac_mode
+              data:
+                mode: "cool"
+                fan: "{{ fan_speed }}"
+                temperature: "{{ states('input_number.target_temp_cool') | float(70) }}"
+            - condition: template
+              value_template: "{{ now().hour >= 7 and now().hour < 22 }}"
+            - service: notify.persistent_notification
+              data:
+                title: "HVAC Mode Changed"
+                message: >-
+                  Cooling triggered by {{ cool_rooms | join(', ') }} to {{ states('input_number.target_temp_cool') | float(70) }}°F (fan: {{ fan_speed }})
+
+        - conditions: >-
+            {{ heat_needed and not cool_needed and current_mode != 'heat' and elapsed_seconds > min_elapsed }}
+          sequence:
+            - service: script.set_all_ac_mode
+              data:
+                mode: "heat"
+                fan: "{{ fan_speed }}"
+                temperature: "{{ states('input_number.target_temp_heat') | float(68) }}"
+            - condition: template
+              value_template: "{{ now().hour >= 7 and now().hour < 22 }}"
+            - service: notify.persistent_notification
+              data:
+                title: "HVAC Mode Changed"
+                message: >-
+                  Heating triggered by {{ heat_rooms | join(', ') }} to {{ states('input_number.target_temp_heat') | float(68) }}°F (fan: {{ fan_speed }})
+
+        - conditions: >-
+            {{ not heat_needed and not cool_needed and current_mode != 'off' and elapsed_seconds > min_elapsed }}
+          sequence:
+            - service: script.set_all_ac_mode
+              data:
+                mode: "off"
+                fan: low
+                temperature: 70
+            - condition: template
+              value_template: "{{ now().hour >= 7 and now().hour < 22 }}"
+            - service: notify.persistent_notification
+              data:
+                title: "HVAC Mode Changed"
+                message: "All rooms within range. HVAC turned off."

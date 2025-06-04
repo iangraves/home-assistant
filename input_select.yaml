@@ -1,0 +1,7 @@
+hvac_mode_state:
+  name: Shared HVAC Mode
+  options:
+    - "False"
+    - "cool"
+    - "heat"
+  initial: "False"

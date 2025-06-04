@@ -1,0 +1,4 @@
+hvac_last_mode_change:
+  name: Last HVAC Mode Change
+  has_date: true
+  has_time: true

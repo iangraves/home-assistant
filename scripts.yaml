@@ -1,0 +1,57 @@
+set_all_ac_mode:
+  alias: Set All ACs Mode
+  fields:
+    mode:
+      description: "HVAC mode: cool, heat, off"
+      example: "cool"
+    fan:
+      description: "Fan speed: low, medium, high"
+      example: "medium"
+    temperature:
+      description: "Target temperature"
+      example: 70
+  sequence:
+    - service: climate.set_hvac_mode
+      data:
+        entity_id:
+          - climate.living_room_ac
+          - climate.primary_ac
+          - climate.nursery_ac
+        hvac_mode: "{{ mode | string | lower }}"
+
+    - service: climate.set_temperature
+      data:
+        entity_id:
+          - climate.living_room_ac
+          - climate.primary_ac
+          - climate.nursery_ac
+        temperature: "{{ temperature | float(70) }}"
+
+    - service: climate.set_fan_mode
+      data:
+        entity_id:
+          - climate.living_room_ac
+          - climate.primary_ac
+          - climate.nursery_ac
+        fan_mode: "{{ fan }}"
+
+    - service: input_select.select_option
+      data:
+        entity_id: input_select.hvac_mode_state
+        option: >-
+          {% if mode == 'off' %}False{% else %}{{ mode }}{% endif %}
+
+    - service: input_datetime.set_datetime
+      data:
+        entity_id: input_datetime.hvac_last_mode_change
+        datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+
+    - service: notify.mobile_app_ians_iphone
+      data:
+        title: "HVAC Mode Changed"
+        message: "Mode set to '{{ mode }}' at {{ temperature | float(70) }}°F with fan '{{ fan }}'"
+
+    - service: notify.persistent_notification
+      data:
+        title: "HVAC Mode Changed"
+        message: "Mode set to '{{ mode }}' at {{ temperature | float(70) }}°F with fan '{{ fan }}'"
