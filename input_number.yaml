@@ -7,10 +7,10 @@ temperature_too_cold:
 
 temperature_too_hot:
   name: Too Hot Threshold
-  min: 71
-  max: 85
+  min: 69
+  max: 80
   step: 1
-  initial: 72
+  initial: 71
 
 target_temp_cool:
   name: Target Temp Cool
@@ -24,4 +24,4 @@ target_temp_heat:
   min: 60
   max: 80
   step: 1
-  initial: 68
+  initial: 69

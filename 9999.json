@@ -8,7 +8,7 @@
   "temperatureStep": 1,
   "precision": 1,
   "operationModes": ["cool", "heat", "dry", "off"],
-  "fanModes": ["auto","low", "medium", "high"],
+  "fanModes": ["low", "medium", "high"],
   "commands": {
     "cool": {
       "low": {

@@ -2,3 +2,8 @@ disable_window_tip:
   name: Disable Window Tip
   icon: mdi:window-closed
   initial: false
+
+ac_automation_enabled:
+  name: AC Automation Enabled
+  icon: mdi:toggle-switch
+  initial: true

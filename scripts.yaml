@@ -1,5 +1,5 @@
 set_all_ac_mode:
-  alias: Set All ACs Mode
+  alias: Set All ACs Mode (Selective)
   fields:
     mode:
       description: "HVAC mode: cool, heat, off"
@@ -10,30 +10,25 @@ set_all_ac_mode:
     temperature:
       description: "Target temperature"
       example: 70
+    entities:
+      description: "List of climate entities to control"
+      example: "climate.living_room_ac"
   sequence:
-    - service: climate.set_hvac_mode
-      data:
-        entity_id:
-          - climate.living_room_ac
-          - climate.primary_ac
-          - climate.nursery_ac
-        hvac_mode: "{{ mode | string | lower }}"
+    - choose:
+        - conditions: "{{ entities | length > 0 }}"
+          sequence:
+            - service: climate.set_hvac_mode
+              data:
+                entity_id: "{{ entities }}"
+                hvac_mode: "{{ mode | string | lower }}"
 
-    - service: climate.set_temperature
-      data:
-        entity_id:
-          - climate.living_room_ac
-          - climate.primary_ac
-          - climate.nursery_ac
-        temperature: "{{ temperature | float(70) }}"
+            - delay: "00:00:01"
 
-    - service: climate.set_fan_mode
-      data:
-        entity_id:
-          - climate.living_room_ac
-          - climate.primary_ac
-          - climate.nursery_ac
-        fan_mode: "{{ fan }}"
+            - service: climate.set_temperature
+              data:
+                entity_id: "{{ entities }}"
+                temperature: "{{ temperature | float(70) }}"
+                fan_mode: "{{ fan }}"
 
     - service: input_select.select_option
       data:
@@ -46,12 +41,7 @@ set_all_ac_mode:
         entity_id: input_datetime.hvac_last_mode_change
         datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
 
-    - service: notify.mobile_app_ians_iphone
-      data:
-        title: "HVAC Mode Changed"
-        message: "Mode set to '{{ mode }}' at {{ temperature | float(70) }}°F with fan '{{ fan }}'"
-
     - service: notify.persistent_notification
       data:
         title: "HVAC Mode Changed"
-        message: "Mode set to '{{ mode }}' at {{ temperature | float(70) }}°F with fan '{{ fan }}'"
+        message: "Mode set to '{{ mode }}' at {{ temperature | float(70) }}°F with fan '{{ fan }}' for {{ entities | join(', ') }}"
