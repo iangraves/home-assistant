@@ -1,0 +1,39 @@
+- sensor:
+    - name: HVAC Mode Elapsed Seconds
+      state: >-
+        {% set last_change_str = states('input_datetime.hvac_last_mode_change') %}
+        {% if last_change_str in ['unknown', 'unavailable', '', none] %}
+          9999
+        {% else %}
+          {% set last_change = strptime(last_change_str, '%Y-%m-%d %H:%M:%S') %}
+          {% set now_naive = now().replace(tzinfo=None) %}
+          {{ (now_naive - last_change).total_seconds() | int }}
+        {% endif %}
+
+- binary_sensor:
+    - name: Window Tip Active
+      state: >-
+        {% set outdoor = state_attr('weather.forecast_home', 'temperature') | float(999) %}
+        {% set max_room = [
+          states('sensor.living_room_rm4_temp') | float(0),
+          states('sensor.primary_rm4_temp') | float(0),
+          states('sensor.nursery_rm4_temp') | float(0)
+        ] | max %}
+        {{ outdoor < max_room - 3 and outdoor < 70 }}
+
+- sensor:
+    - name: Highest Room Temp
+      unique_id: highest_room_temp
+      unit_of_measurement: "°F"
+      state: >
+        {{ [
+          states('sensor.living_room_rm4_temp') | float(0),
+          states('sensor.primary_rm4_temp') | float(0),
+          states('sensor.nursery_rm4_temp') | float(0)
+        ] | max }}
+- sensor:
+    - name: Outside Next Hour Temp
+      unique_id: outside_next_hour_temp
+      unit_of_measurement: "°F"
+      state: >
+        {{ state_attr('weather.home', 'forecast')[0]['temperature'] if state_attr('weather.home', 'forecast') else 0 }}
