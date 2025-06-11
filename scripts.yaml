@@ -1,47 +1,86 @@
 set_all_ac_mode:
   alias: Set All ACs Mode (Selective)
+  mode: parallel
   fields:
     mode:
-      description: "HVAC mode: cool, heat, off"
-      example: "cool"
+      description: 'Mode to set (cool/heat/off)'
+      example: 'cool'
     fan:
-      description: "Fan speed: low, medium, high"
-      example: "medium"
+      description: 'Fan mode (low/medium/high/auto)'
+      example: 'high'
     temperature:
-      description: "Target temperature"
+      description: 'Temperature to set'
       example: 70
     entities:
-      description: "List of climate entities to control"
+      description: 'List of climate entities'
+      example: "climate.living_room_ac, climate.primary_ac"
+  sequence:
+    - repeat:
+        for_each: "{{ entities }}"
+        sequence:
+          - choose:
+              - conditions: "{{ mode != 'off' }}"
+                sequence:
+                  - service: climate.set_hvac_mode
+                    data:
+                      entity_id: "{{ repeat.item }}"
+                      hvac_mode: "{{ mode }}"
+                  - service: climate.set_temperature
+                    data:
+                      entity_id: "{{ repeat.item }}"
+                      temperature: "{{ temperature }}"
+                  - service: climate.set_fan_mode
+                    data:
+                      entity_id: "{{ repeat.item }}"
+                      fan_mode: "{{ fan }}"
+              - conditions: "{{ mode == 'off' }}"
+                sequence:
+                  - service: climate.set_hvac_mode
+                    data:
+                      entity_id: "{{ repeat.item }}"
+                      hvac_mode: "off"
+
+set_ac_if_needed:
+  alias: Set AC If Needed
+  mode: parallel
+  fields:
+    entity:
+      description: 'Target climate entity'
       example: "climate.living_room_ac"
+    mode:
+      description: 'HVAC mode (cool/heat/off/auto/dry/fan_only)'
+      example: "cool"
+    temperature:
+      description: 'Temperature to set'
+      example: 70
+    fan:
+      description: 'Fan mode (low/medium/high/auto)'
+      example: "high"
   sequence:
     - choose:
-        - conditions: "{{ entities | length > 0 }}"
+        - conditions: >
+            {{ mode != "off" and (
+              not is_state(entity, mode)
+              or (state_attr(entity, 'temperature') | float != temperature | float)
+              or (state_attr(entity, 'fan_mode') != fan)
+            ) }}
           sequence:
             - service: climate.set_hvac_mode
               data:
-                entity_id: "{{ entities }}"
-                hvac_mode: "{{ mode | string | lower }}"
-
-            - delay: "00:00:01"
-
+                entity_id: "{{ entity }}"
+                hvac_mode: "{{ mode | lower }}"
             - service: climate.set_temperature
               data:
-                entity_id: "{{ entities }}"
-                temperature: "{{ temperature | float(70) }}"
+                entity_id: "{{ entity }}"
+                temperature: "{{ temperature }}"
+            - service: climate.set_fan_mode
+              data:
+                entity_id: "{{ entity }}"
                 fan_mode: "{{ fan }}"
-
-    - service: input_select.select_option
-      data:
-        entity_id: input_select.hvac_mode_state
-        option: >-
-          {% if mode == 'off' %}False{% else %}{{ mode }}{% endif %}
-
-    - service: input_datetime.set_datetime
-      data:
-        entity_id: input_datetime.hvac_last_mode_change
-        datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
-
-    - service: notify.persistent_notification
-      data:
-        title: "HVAC Mode Changed"
-        message: "Mode set to '{{ mode }}' at {{ temperature | float(70) }}°F with fan '{{ fan }}' for {{ entities | join(', ') }}"
+        - conditions: >
+            {{ mode == "off" and not is_state(entity, "off") }}
+          sequence:
+            - service: climate.set_hvac_mode
+              data:
+                entity_id: "{{ entity }}"
+                hvac_mode: "off"

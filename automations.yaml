@@ -1,13 +1,8 @@
-- alias: SmartIR - Shared HVAC Mode Controller
-  mode: restart
+- alias: SmartIR - Shared HVAC Mode Controller (Hysteresis + Quiet Night)
+  mode: queued
   trigger:
     - platform: time_pattern
-      minutes: /5
-    - platform: state
-      entity_id:
-        - sensor.living_room_rm4_temp
-        - sensor.primary_rm4_temp
-        - sensor.nursery_rm4_temp
+      minutes: /10
   condition:
     - condition: state
       entity_id: input_boolean.ac_automation_enabled
@@ -20,153 +15,163 @@
         living_temp: "{{ states('sensor.living_room_rm4_temp') | float }}"
         too_cold: "{{ states('input_number.temperature_too_cold') | float(66) }}"
         too_hot: "{{ states('input_number.temperature_too_hot') | float(71) }}"
-        current_mode: "{{ states('input_select.hvac_mode_state') | lower }}"
-        nursery_active: true
-        primary_active: "{{ now_hour >= 21 or now_hour < 8 }}"
-        living_active: "{{ now_hour >= 7 and now_hour < 23 }}"
-        cool_rooms: >-
+        hysteresis: 1
+
+        nursery_night: "{{ now_hour >= 18 or now_hour < 8 }}"
+        primary_night: "{{ now_hour >= 21 or now_hour < 8 }}"
+
+        nursery_night_emergency: >
+          {{ (nursery_temp > too_hot + 2) or (nursery_temp < too_cold - 2) }}
+        primary_night_emergency: >
+          {{ (primary_temp > too_hot + 2) or (primary_temp < too_cold - 2) }}
+
+        cool_targets: >-
           {{
             [
-              'nursery' if nursery_active and nursery_temp > too_hot else '',
-              'primary' if primary_active and primary_temp > too_hot else '',
-              'living' if living_active and living_temp > too_hot else ''
-            ] | select('string') | list
+              {
+                "entity": "climate.nursery_ac",
+                "active": (
+                  (nursery_night and nursery_night_emergency) or (not nursery_night and nursery_temp > too_hot)
+                ),
+                "should_off": (
+                  (nursery_night and not nursery_night_emergency and nursery_temp < (too_hot - hysteresis))
+                  or (not nursery_night and nursery_temp < (too_hot - hysteresis))
+                ),
+                "temp": nursery_temp
+              },
+              {
+                "entity": "climate.primary_ac",
+                "active": (
+                  (primary_night and primary_night_emergency) or (not primary_night and primary_temp > too_hot)
+                ),
+                "should_off": (
+                  (primary_night and not primary_night_emergency and primary_temp < (too_hot - hysteresis))
+                  or (not primary_night and primary_temp < (too_hot - hysteresis))
+                ),
+                "temp": primary_temp
+              },
+              {
+                "entity": "climate.living_room_ac",
+                "active": (living_temp > too_hot),
+                "should_off": (living_temp < (too_hot - hysteresis)),
+                "temp": living_temp
+              }
+            ]
           }}
-        heat_rooms: >-
+        heat_targets: >-
           {{
             [
-              'nursery' if nursery_active and nursery_temp < too_cold else '',
-              'primary' if primary_active and primary_temp < too_cold else '',
-              'living' if living_active and living_temp < too_cold else ''
-            ] | select('string') | list
+              {
+                "entity": "climate.nursery_ac",
+                "active": (
+                  (nursery_night and nursery_night_emergency) or (not nursery_night and nursery_temp < too_cold)
+                ),
+                "should_off": (
+                  (nursery_night and not nursery_night_emergency and nursery_temp > (too_cold + hysteresis))
+                  or (not nursery_night and nursery_temp > (too_cold + hysteresis))
+                ),
+                "temp": nursery_temp
+              },
+              {
+                "entity": "climate.primary_ac",
+                "active": (
+                  (primary_night and primary_night_emergency) or (not primary_night and primary_temp < too_cold)
+                ),
+                "should_off": (
+                  (primary_night and not primary_night_emergency and primary_temp > (too_cold + hysteresis))
+                  or (not primary_night and primary_temp > (too_cold + hysteresis))
+                ),
+                "temp": primary_temp
+              },
+              {
+                "entity": "climate.living_room_ac",
+                "active": (living_temp < too_cold),
+                "should_off": (living_temp > (too_cold + hysteresis)),
+                "temp": living_temp
+              }
+            ]
           }}
-        cool_needed: "{{ cool_rooms | length > 0 }}"
-        heat_needed: "{{ heat_rooms | length > 0 }}"
-        cool_entities: >-
-          {{
-            [
-              'climate.nursery_ac' if 'nursery' in cool_rooms and nursery_active else None,
-              'climate.primary_ac' if 'primary' in cool_rooms and primary_active else None,
-              'climate.living_room_ac' if 'living' in cool_rooms and living_active else None
-            ] | select('string') | list
-          }}
-        heat_entities: >-
-          {{
-            [
-              'climate.nursery_ac' if 'nursery' in heat_rooms and nursery_active else None,
-              'climate.primary_ac' if 'primary' in heat_rooms and primary_active else None,
-              'climate.living_room_ac' if 'living' in heat_rooms and living_active else None
-            ] | select('string') | list
-          }}
-        done_rooms: >-
-          {{
-            [
-              'nursery' if nursery_active and nursery_temp <= too_hot and nursery_temp >= too_cold else '',
-              'primary' if primary_active and primary_temp <= too_hot and primary_temp >= too_cold else '',
-              'living' if living_active and living_temp <= too_hot and living_temp >= too_cold else ''
-            ] | select('string') | list
-          }}
-        done_entities: >-
-          {{
-            [
-              'climate.nursery_ac' if 'nursery' in done_rooms else None,
-              'climate.primary_ac' if 'primary' in done_rooms else None,
-              'climate.living_room_ac' if 'living' in done_rooms else None
-            ] | select('string') | list
-          }}
-        actually_on_done_entities: >-
-          {{
-            done_entities | reject('is_state', 'off') | list
-          }}
-        cool_entities_not_cooling: >-
-          {{
-            cool_entities | reject('is_state', 'cool') | list
-          }}
+
         elapsed_seconds: "{{ states('sensor.hvac_mode_elapsed_seconds') | float(9999) }}"
         min_elapsed: 1800
         fan_speed: >-
           {% set max_temp = [
-            nursery_temp if 'nursery' in cool_rooms else too_cold,
-            primary_temp if 'primary' in cool_rooms else too_cold,
-            living_temp if 'living' in cool_rooms else too_cold
+            nursery_temp if cool_targets[0]['active'] else too_cold,
+            primary_temp if cool_targets[1]['active'] else too_cold,
+            living_temp if cool_targets[2]['active'] else too_cold
           ] | max %}
           {% set min_temp = [
-            nursery_temp if 'nursery' in heat_rooms else too_hot,
-            primary_temp if 'primary' in heat_rooms else too_hot,
-            living_temp if 'living' in heat_rooms else too_hot
+            nursery_temp if heat_targets[0]['active'] else too_hot,
+            primary_temp if heat_targets[1]['active'] else too_hot,
+            living_temp if heat_targets[2]['active'] else too_hot
           ] | min %}
-          {% set delta = (max_temp - 70) if cool_needed else (70 - min_temp) if heat_needed else 0 %}
+          {% set delta = (max_temp - 70) if (cool_targets[0]['active'] or cool_targets[1]['active'] or cool_targets[2]['active']) else (70 - min_temp) if (heat_targets[0]['active'] or heat_targets[1]['active'] or heat_targets[2]['active']) else 0 %}
           {% if delta >= 4 %}high
           {% elif delta >= 2 %}medium
           {% elif delta > 0 %}low
           {% else %}low
           {% endif %}
-    - service: logbook.log
-      data:
-        name: "HVAC Automation"
-        message: |-
-          now_hour: {{ now_hour }}
-          nursery_temp: {{ nursery_temp }}, primary_temp: {{ primary_temp }}, living_temp: {{ living_temp }}
-          too_cold: {{ too_cold }}, too_hot: {{ too_hot }}
-          current_mode: {{ current_mode }}
-          nursery_active: {{ nursery_active }}, primary_active: {{ primary_active }}, living_active: {{ living_active }}
-          cool_rooms: {{ cool_rooms }}, heat_rooms: {{ heat_rooms }}
-          cool_needed: {{ cool_needed }}, heat_needed: {{ heat_needed }}
-          cool_entities: {{ cool_entities }}, heat_entities: {{ heat_entities }}
-          done_entities: {{ done_entities }}, actually_on_done_entities: {{ actually_on_done_entities }}
-          cool_entities_not_cooling: {{ cool_entities_not_cooling }}
-          done_rooms: {{ done_rooms }}
-          elapsed_seconds: {{ elapsed_seconds }}, min_elapsed: {{ min_elapsed }}
-          fan_speed: {{ fan_speed }}
+
     - choose:
-        - conditions: "{{ cool_needed and cool_entities_not_cooling | length > 0 and elapsed_seconds > min_elapsed }}"
+        - conditions: "{{ elapsed_seconds > min_elapsed }}"
           sequence:
-            - service: script.set_all_ac_mode
-              data:
-                mode: cool
-                fan: "{{ fan_speed }}"
-                temperature: "{{ states('input_number.target_temp_cool') | float(70) }}"
-                entities: "{{ cool_entities_not_cooling }}"
-            - service: notify.persistent_notification
-              data:
-                title: HVAC Mode Correction
-                message: "Some ACs were not cooling but should be. Sent cool command to: {{ cool_entities_not_cooling | join(', ') }}"
-        - conditions: "{{ cool_needed and current_mode != 'cool' and elapsed_seconds > min_elapsed and cool_entities | length > 0 }}"
-          sequence:
-            - service: script.set_all_ac_mode
-              data:
-                mode: cool
-                fan: "{{ fan_speed }}"
-                temperature: "{{ states('input_number.target_temp_cool') | float(70) }}"
-                entities: "{{ cool_entities }}"
-            - service: notify.persistent_notification
-              data:
-                title: HVAC Mode Changed
-                message: "Cooling triggered by {{ cool_rooms | join(', ') }} to {{ states('input_number.target_temp_cool') | float(70) }}°F (fan: {{ fan_speed }}) for {{ cool_entities | join(', ') }}"
-        - conditions: "{{ heat_needed and not cool_needed and current_mode != 'heat' and elapsed_seconds > min_elapsed and heat_entities | length > 0 }}"
-          sequence:
-            - service: script.set_all_ac_mode
-              data:
-                mode: heat
-                fan: "{{ fan_speed }}"
-                temperature: "{{ states('input_number.target_temp_heat') | float(68) }}"
-                entities: "{{ heat_entities }}"
-            - service: notify.persistent_notification
-              data:
-                title: HVAC Mode Changed
-                message: "Heating triggered by {{ heat_rooms | join(', ') }} to {{ states('input_number.target_temp_heat') | float(68) }}°F (fan: {{ fan_speed }}) for {{ heat_entities | join(', ') }}"
-        - conditions: "{{ actually_on_done_entities | length > 0 and elapsed_seconds > min_elapsed }}"
-          sequence:
-            - service: script.set_all_ac_mode
-              data:
-                mode: 'off'
-                fan: low
-                temperature: 70
-                entities: "{{ actually_on_done_entities }}"
-            - service: notify.persistent_notification
-              data:
-                title: HVAC Mode Changed
-                message: "Rooms reached target: {{ done_rooms | join(', ') }}. Turned off: {{ actually_on_done_entities | join(', ') }}."
+            - repeat:
+                for_each: "{{ cool_targets }}"
+                sequence:
+                  - choose:
+                      - conditions: "{{ repeat.item.active }}"
+                        sequence:
+                          - service: script.set_ac_if_needed
+                            data:
+                              entity: "{{ repeat.item.entity }}"
+                              mode: "cool"
+                              temperature: "{{ states('input_number.target_temp_cool') | float(70) }}"
+                              fan: "{{ fan_speed }}"
+                      - conditions: "{{ repeat.item.should_off }}"
+                        sequence:
+                          - service: script.set_ac_if_needed
+                            data:
+                              entity: "{{ repeat.item.entity }}"
+                              mode: "off"
+                              temperature: 70
+                              fan: "low"
+            - repeat:
+                for_each: "{{ heat_targets }}"
+                sequence:
+                  - choose:
+                      - conditions: "{{ repeat.item.active }}"
+                        sequence:
+                          - service: script.set_ac_if_needed
+                            data:
+                              entity: "{{ repeat.item.entity }}"
+                              mode: "heat"
+                              temperature: "{{ states('input_number.target_temp_heat') | float(68) }}"
+                              fan: "{{ fan_speed }}"
+                      - conditions: "{{ repeat.item.should_off }}"
+                        sequence:
+                          - service: script.set_ac_if_needed
+                            data:
+                              entity: "{{ repeat.item.entity }}"
+                              mode: "off"
+                              temperature: 70
+                              fan: "low"
+
+- alias: Notify - Outside Cooler Than Inside
+  mode: single
+  trigger:
+    - platform: time_pattern
+      minutes: 0
+  condition:
+    - condition: template
+      value_template: >
+        {{ states('sensor.highest_room_temp') | float(0) - states('sensor.outside_next_hour_temp') | float(0) >= 5 }}
+  action:
+    - service: persistent_notification.create
+      data:
+        title: "Turn Off AC and Open Windows?"
+        message: >-
+          The inside is at {{ states('sensor.highest_room_temp') }}°F, but in the next hour the outside is forecast to be {{ states('sensor.outside_next_hour_temp') }}°F.
+          Consider opening windows instead of using the AC.
 
 - alias: Update HVAC Last Mode Change
   trigger:
@@ -179,18 +184,3 @@
       data:
         datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
   mode: queued
-
-- id: '1749149063284'
-  alias: Garage Thermostat battery
-  description: ''
-  trigger:
-    - platform: numeric_state
-      entity_id:
-        - sensor.garage_freezer_thermostat_battery
-      below: 10
-  condition: []
-  action:
-    - service: persistent_notification.create
-      data:
-        message: Govee battery low (10%)
-  mode: single
